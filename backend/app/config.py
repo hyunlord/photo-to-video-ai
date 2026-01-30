@@ -24,8 +24,10 @@ class Settings(BaseSettings):
 
     # Local Models
     MODELS_DIR: str = "./models"
+    LOCAL_MODEL_PATH: Optional[str] = None  # Path to downloaded SVD models
     ENABLE_LOCAL_MODELS: bool = True
     GPU_DEVICE: str = "cuda:0"
+    DEFAULT_LOCAL_MODEL: str = "svd-xt-1.1"  # Default SVD model
 
     # Processing
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"

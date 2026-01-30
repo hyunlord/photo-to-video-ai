@@ -1,0 +1,41 @@
+# ============================================
+# GPU Override for Photo to Video Application
+# Usage: docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# ============================================
+
+version: '3.8'
+
+services:
+  # GPU-enabled Backend
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.gpu
+      target: ${BUILD_TARGET:-development}
+    environment:
+      - ENABLE_LOCAL_MODELS=true
+      - GPU_DEVICE=cuda:0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # GPU-enabled Celery Worker
+  celery-worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.gpu
+      target: ${BUILD_TARGET:-development}
+    environment:
+      - ENABLE_LOCAL_MODELS=true
+      - GPU_DEVICE=cuda:0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

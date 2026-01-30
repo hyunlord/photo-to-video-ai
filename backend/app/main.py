@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import projects, upload, generation, websocket
@@ -9,10 +10,21 @@ app = FastAPI(
     version="0.1.0"
 )
 
-# CORS middleware
+# CORS middleware - allow both local and Docker hostnames
+allowed_origins = [
+    "http://localhost:3000",      # Local development
+    "http://127.0.0.1:3000",      # Alternative local
+    "http://frontend:3000",       # Docker internal
+]
+
+# Add custom frontend URL if provided
+custom_frontend = os.getenv("FRONTEND_URL")
+if custom_frontend:
+    allowed_origins.append(custom_frontend)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Next.js dev server
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

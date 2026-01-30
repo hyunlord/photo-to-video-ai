@@ -1,0 +1,78 @@
+# ============================================
+# Photo to Video Backend Dockerfile (GPU-enabled)
+# For NVIDIA CUDA support with local AI models
+# ============================================
+
+# Stage 1: Base image with CUDA
+FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04 AS base
+
+# Prevent interactive prompts
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+# Install Python and system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 \
+    python3.11-venv \
+    python3-pip \
+    python3.11-dev \
+    ffmpeg \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    curl \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Python 3.11 as default
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1 && \
+    update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1
+
+# Upgrade pip
+RUN python -m pip install --upgrade pip
+
+WORKDIR /app
+
+# Install PyTorch with CUDA support first (separate layer for caching)
+RUN pip install --no-cache-dir \
+    torch==2.2.0 \
+    torchvision==0.17.0 \
+    --index-url https://download.pytorch.org/whl/cu121
+
+# Install remaining dependencies
+COPY requirements.txt .
+# Filter out torch/torchvision since we installed them separately
+RUN grep -v "^torch\|^torchvision" requirements.txt > requirements-no-torch.txt && \
+    pip install --no-cache-dir -r requirements-no-torch.txt
+
+# ============================================
+# Stage 2: Development with GPU
+# ============================================
+FROM base AS development
+
+RUN pip install --no-cache-dir watchfiles
+
+COPY . .
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+# ============================================
+# Stage 3: Production with GPU
+# ============================================
+FROM base AS production
+
+COPY . .
+
+RUN useradd --create-home --shell /bin/bash appuser && \
+    chown -R appuser:appuser /app
+USER appuser
+
+EXPOSE 8000
+
+# Fewer workers for GPU tasks (GPU doesn't parallelize well)
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

@@ -1,0 +1,59 @@
+# ============================================
+# Production Override for Photo to Video Application
+# Usage: BUILD_TARGET=production docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+# ============================================
+
+version: '3.8'
+
+services:
+  # Production Backend
+  backend:
+    build:
+      target: production
+    volumes:
+      - models_data:/app/models
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Production Celery Worker
+  celery-worker:
+    build:
+      target: production
+    volumes:
+      - models_data:/app/models
+      - video_temp:/tmp/video_gen
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Production Frontend
+  frontend:
+    build:
+      target: production
+      args:
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:8000}
+    volumes: []
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Infrastructure with restart policy
+  db:
+    restart: always
+
+  redis:
+    restart: always
+
+  minio:
+    restart: always
