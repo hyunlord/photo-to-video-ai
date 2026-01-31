@@ -10,26 +10,17 @@ FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
-# Configure DNS for apt
-RUN echo "nameserver 8.8.8.8" > /etc/resolv.conf && \
-    echo "nameserver 1.1.1.1" >> /etc/resolv.conf
-
-# Install system dependencies (with retry for network issues)
-RUN for i in 1 2 3; do \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    apt-get update && \
+# Install system dependencies
+RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     ffmpeg \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     libsm6 \
     libxext6 \
-    libxrender-dev \
+    libxrender1 \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && break || sleep 5; \
-    done
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
