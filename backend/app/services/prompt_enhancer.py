@@ -55,8 +55,24 @@ class PromptEnhancer:
         self.vision_processor = None
         self._vision_initialized = False
 
+    def _get_device(self) -> str:
+        """Get best available device string (CUDA > MPS > CPU)"""
+        if torch.cuda.is_available():
+            return "cuda"
+        elif torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    def _clear_memory_cache(self):
+        """Clear GPU/MPS memory cache"""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            if hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
+
     def _load_vision_model(self):
-        """Vision 모델 lazy loading"""
+        """Vision 모델 lazy loading (CUDA/MPS/CPU 지원)"""
         if self._vision_initialized:
             return
 
@@ -72,7 +88,7 @@ class PromptEnhancer:
                 "Salesforce/blip-image-captioning-base"
             )
 
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            device = self._get_device()
             self.vision_model = self.vision_model.to(device)
             self._vision_initialized = True
 
@@ -214,7 +230,7 @@ class PromptEnhancer:
         return prompts
 
     def unload_vision_model(self):
-        """Vision 모델 메모리 해제"""
+        """Vision 모델 메모리 해제 (CUDA/MPS 지원)"""
         if self.vision_model is not None:
             del self.vision_model
             del self.vision_processor
@@ -222,8 +238,7 @@ class PromptEnhancer:
             self.vision_processor = None
             self._vision_initialized = False
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            self._clear_memory_cache()
 
             logger.info("Vision model unloaded")
 

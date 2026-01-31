@@ -48,14 +48,50 @@ class WanService:
         self.models_dir = Path(models_dir or settings.MODELS_DIR)
         self._initialized = False
 
-    def _get_vram_gb(self) -> float:
-        """Get available VRAM in GB"""
+    def _get_device(self) -> torch.device:
+        """Get best available device (CUDA > MPS > CPU)"""
+        if torch.cuda.is_available():
+            return torch.device("cuda")
+        elif torch.backends.mps.is_available():
+            return torch.device("mps")
+        else:
+            return torch.device("cpu")
+
+    def _get_device_type(self) -> str:
+        """Get device type string"""
+        if torch.cuda.is_available():
+            return "cuda"
+        elif torch.backends.mps.is_available():
+            return "mps"
+        return "cpu"
+
+    def _get_memory_gb(self) -> float:
+        """Get available GPU/Unified memory in GB"""
         if torch.cuda.is_available():
             return torch.cuda.get_device_properties(0).total_memory / 1e9
+        elif torch.backends.mps.is_available():
+            # MPS uses Unified Memory - get system RAM as estimate
+            try:
+                import psutil
+                return psutil.virtual_memory().total / 1e9
+            except ImportError:
+                return 64.0  # Default assumption for Apple Silicon
         return 0
 
+    def _clear_memory_cache(self):
+        """Clear GPU/MPS memory cache"""
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif torch.backends.mps.is_available():
+            if hasattr(torch.mps, 'empty_cache'):
+                torch.mps.empty_cache()
+
+    def _get_vram_gb(self) -> float:
+        """Get available VRAM in GB (alias for _get_memory_gb)"""
+        return self._get_memory_gb()
+
     def load_model(self):
-        """모델 로드"""
+        """모델 로드 (CUDA/MPS/CPU 지원)"""
         if self._initialized:
             return
 
@@ -65,14 +101,19 @@ class WanService:
             # Fallback: diffusers might use different class name
             from diffusers import DiffusionPipeline as WanPipeline
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = self._get_device()
+        device_type = self._get_device_type()
         model_path = self.models_dir / "wan" / "wan2.1_flf2v_720p"
 
-        # VRAM에 따라 precision 결정
-        vram_gb = self._get_vram_gb()
+        # 메모리에 따라 precision 결정
+        memory_gb = self._get_memory_gb()
 
-        if vram_gb < 12:
-            logger.info(f"Low VRAM ({vram_gb:.1f}GB), using FP8 quantization")
+        # MPS는 FP8을 지원하지 않음
+        if device_type == "mps":
+            dtype = torch.float16
+            logger.info(f"MPS device detected, using FP16 (Unified Memory: {memory_gb:.1f}GB)")
+        elif memory_gb < 12:
+            logger.info(f"Low VRAM ({memory_gb:.1f}GB), using FP8 quantization")
             dtype = torch.float8_e4m3fn if hasattr(torch, 'float8_e4m3fn') else torch.float16
         else:
             dtype = torch.float16
@@ -85,14 +126,15 @@ class WanService:
         )
         self.pipe.to(self.device)
 
-        # 메모리 최적화
-        if hasattr(self.pipe, 'enable_model_cpu_offload'):
-            self.pipe.enable_model_cpu_offload()
+        # 메모리 최적화 (MPS에서는 일부 기능 미지원)
+        if device_type != "mps":
+            if hasattr(self.pipe, 'enable_model_cpu_offload'):
+                self.pipe.enable_model_cpu_offload()
         if hasattr(self.pipe, 'enable_vae_slicing'):
             self.pipe.enable_vae_slicing()
 
         self._initialized = True
-        logger.info(f"Wan 2.1 loaded on {self.device} ({vram_gb:.1f}GB VRAM)")
+        logger.info(f"Wan 2.1 loaded on {self.device} ({memory_gb:.1f}GB {'Unified Memory' if device_type == 'mps' else 'VRAM'})")
 
     def generate_single_transition(
         self,
@@ -260,14 +302,13 @@ class WanService:
         return output_path.read_bytes()
 
     def unload_model(self):
-        """메모리 해제"""
+        """메모리 해제 (CUDA/MPS 지원)"""
         if self.pipe is not None:
             del self.pipe
             self.pipe = None
             self._initialized = False
 
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            self._clear_memory_cache()
 
             logger.info("Wan 2.1 model unloaded")
 
@@ -286,33 +327,56 @@ def get_wan_service() -> WanService:
 
 def check_wan_available() -> dict:
     """
-    Wan 서비스 가용성 확인
+    Wan 서비스 가용성 확인 (CUDA/MPS 지원)
 
     Returns:
         Dict with availability status and details
     """
     model_dir = Path(settings.MODELS_DIR) / "wan" / "wan2.1_flf2v_720p"
     model_exists = model_dir.exists() and any(model_dir.iterdir()) if model_dir.exists() else False
-    cuda_available = torch.cuda.is_available()
 
-    vram_gb = 0
+    cuda_available = torch.cuda.is_available()
+    mps_available = torch.backends.mps.is_available()
+    gpu_available = cuda_available or mps_available
+
+    # 디바이스 타입 결정
     if cuda_available:
-        vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        device_type = "cuda"
+    elif mps_available:
+        device_type = "mps"
+    else:
+        device_type = "cpu"
+
+    # 메모리 확인
+    memory_gb = 0
+    if cuda_available:
+        memory_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+    elif mps_available:
+        # MPS uses Unified Memory
+        try:
+            import psutil
+            memory_gb = psutil.virtual_memory().total / 1e9
+        except ImportError:
+            memory_gb = 64.0  # Default assumption for Apple Silicon
 
     # 추천 프리셋 결정
-    if vram_gb < 12:
+    if memory_gb < 12:
         recommended_preset = "fast"
-    elif vram_gb < 24:
+    elif memory_gb < 24:
         recommended_preset = "balanced"
     else:
         recommended_preset = "quality"
 
     return {
-        "available": model_exists and cuda_available and settings.ENABLE_LOCAL_MODELS,
+        "available": model_exists and gpu_available and settings.ENABLE_LOCAL_MODELS,
         "model_exists": model_exists,
         "model_dir": str(model_dir),
         "cuda_available": cuda_available,
-        "vram_gb": round(vram_gb, 1),
+        "mps_available": mps_available,
+        "gpu_available": gpu_available,
+        "device_type": device_type,
+        "memory_gb": round(memory_gb, 1),
+        "vram_gb": round(memory_gb, 1),  # Alias for backward compatibility
         "recommended_preset": recommended_preset,
         "enabled": settings.ENABLE_LOCAL_MODELS,
     }
