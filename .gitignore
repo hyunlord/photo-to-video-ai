@@ -41,11 +41,13 @@ venv.bak/
 .env.local
 .env.*.local
 
-# Models
-models/
+# AI Models (large model files)
+/models/
+backend/models/
 *.pth
 *.pt
 *.ckpt
+*.safetensors
 
 # Temporary files
 tmp/
