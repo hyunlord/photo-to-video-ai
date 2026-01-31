@@ -7,7 +7,7 @@ import redis
 
 from app.workers.celery_app import celery_app
 from app.models import get_db, Job, Photo, Project
-from app.services.video_processing.pipeline import VideoProcessingPipeline
+from app.services.video_pipeline import VideoPipeline
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -69,15 +69,8 @@ def generate_video_task(
         logger.error(f"Not enough photos for job {job_id}")
         return
 
-    # Convert photos to dict format
-    photos_data = [
-        {
-            "id": str(photo.id),
-            "file_path": photo.file_path,
-            "order_index": photo.order_index
-        }
-        for photo in photos
-    ]
+    # Extract photo paths (S3 paths, ordered by order_index)
+    photo_paths = [photo.file_path for photo in photos]
 
     # Progress callback to update Redis and database
     def progress_callback(percentage: int, message: str):
@@ -101,7 +94,7 @@ def generate_video_task(
         db.commit()
 
         # Create pipeline
-        pipeline = VideoProcessingPipeline(project_id, job_id)
+        pipeline = VideoPipeline(project_id, job_id)
 
         # Process video (this is synchronous for now)
         import asyncio
@@ -109,7 +102,7 @@ def generate_video_task(
         asyncio.set_event_loop(loop)
 
         result_path = loop.run_until_complete(
-            pipeline.process(photos_data, settings_dict, progress_callback)
+            pipeline.process(photo_paths, settings_dict, progress_callback)
         )
 
         # Update job with result
