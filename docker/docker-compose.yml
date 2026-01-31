@@ -134,6 +134,7 @@ services:
       dockerfile: Dockerfile.worker
       target: ${BUILD_TARGET:-development}
     container_name: photovideo-celery-worker
+    command: ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "--pool=solo", "-Q", "celery,video_generation"]
     environment:
       - DATABASE_URL=postgresql://photouser:photopass@db:5432/photovideo
       - REDIS_URL=redis://redis:6379/0
@@ -170,13 +171,13 @@ services:
       dockerfile: Dockerfile
       target: ${BUILD_TARGET:-development}
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_API_URL=http://localhost:8000/api
         - NEXT_PUBLIC_WS_URL=ws://localhost:8000
     container_name: photovideo-frontend
     ports:
       - "3000:3000"
     environment:
-      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api
       - NEXT_PUBLIC_WS_URL=ws://localhost:8000
     volumes:
       - ../frontend:/app

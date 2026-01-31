@@ -1,21 +1,14 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from typing import Dict, Set
 import json
-import redis
 import asyncio
 import logging
-
-from app.config import settings
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 # Store active WebSocket connections
 active_connections: Dict[str, Set[WebSocket]] = {}
-
-# Redis client for pub/sub
-redis_client = redis.from_url(settings.REDIS_URL)
-pubsub = redis_client.pubsub()
 
 @router.websocket("/projects/{project_id}")
 async def websocket_endpoint(websocket: WebSocket, project_id: str):
@@ -61,7 +54,8 @@ async def websocket_endpoint(websocket: WebSocket, project_id: str):
                 # Send ping to keep connection alive
                 try:
                     await websocket.send_json({"type": "ping"})
-                except:
+                except Exception as e:
+                    logger.debug(f"WebSocket ping failed for project {project_id}: {e}")
                     break
 
     except WebSocketDisconnect:

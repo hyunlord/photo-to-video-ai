@@ -1,10 +1,19 @@
 import os
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import projects, upload, generation, websocket
 from app.config import settings
+from app.models import Base, engine
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Create database tables on startup
+    Base.metadata.create_all(bind=engine)
+    yield
 
 app = FastAPI(
+    lifespan=lifespan,
     title="Photo to Video API",
     description="AI-powered photo to video conversion API",
     version="0.1.0"
